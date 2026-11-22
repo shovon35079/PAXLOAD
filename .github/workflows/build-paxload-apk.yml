@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build PAXLOAD Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -25,56 +25,44 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle 8.9
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Extract PAXLOAD Source ZIP
-        run: unzip -o PAXLOAD_Source_Project.zip
-
-      - name: Fix Java and Kotlin JVM Target
+      - name: Extract Source ZIP
         run: |
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
-          p = Path("PAXLOAD_Source_Project/app/build.gradle.kts")
-          s = p.read_text()
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No source ZIP found!"
+            exit 1
+          fi
 
-          compile_options = """compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }"""
+          echo "Found ZIP: $ZIP_FILE"
+          mkdir -p extracted
+          unzip -o "$ZIP_FILE" -d extracted
 
-          pattern = r'compileOptions\s*\{[^}]*\}'
+      - name: Locate Android Project
+        run: |
+          SETTINGS_FILE=$(find extracted -name settings.gradle.kts -print -quit)
 
-          if re.search(pattern, s):
-              s = re.sub(pattern, compile_options, s, count=1)
-          else:
-              if "android {" not in s:
-                  raise SystemExit("Android block not found")
-              s = s.replace(
-                  "android {",
-                  "android {\n              " + compile_options,
-                  1
-              )
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: settings.gradle.kts not found!"
+            exit 1
+          fi
 
-          p.write_text(s)
-          print("Java compatibility set to 17")
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "Project found: $PROJECT_DIR"
 
-          if 'jvmTarget = "17"' not in s:
-              print("WARNING: Check Kotlin JVM target setting.")
-          else:
-              print("Kotlin JVM target is already 17.")
-          PY
+      - name: Build APK
+        run: |
+          gradle --no-daemon -p "$PROJECT_DIR" assembleDebug
 
-      - name: Build PAXLOAD Debug APK
-        run: gradle --no-daemon -p PAXLOAD_Source_Project assembleDebug
-
-      - name: Upload PAXLOAD APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: PAXLOAD-debug-apk
-          path: PAXLOAD_Source_Project/app/build/outputs/apk/debug/app-debug.apk
+          path: extracted/**/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
