@@ -3,7 +3,8 @@ name: Build PAXLOAD APK
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -11,9 +12,11 @@ permissions:
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -22,19 +25,56 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Extract source ZIP
+      - name: Extract PAXLOAD Source ZIP
         run: unzip -o PAXLOAD_Source_Project.zip
 
-      - name: Build APK
+      - name: Fix Java and Kotlin JVM Target
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          p = Path("PAXLOAD_Source_Project/app/build.gradle.kts")
+          s = p.read_text()
+
+          compile_options = """compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }"""
+
+          pattern = r'compileOptions\s*\{[^}]*\}'
+
+          if re.search(pattern, s):
+              s = re.sub(pattern, compile_options, s, count=1)
+          else:
+              if "android {" not in s:
+                  raise SystemExit("Android block not found")
+              s = s.replace(
+                  "android {",
+                  "android {\n              " + compile_options,
+                  1
+              )
+
+          p.write_text(s)
+          print("Java compatibility set to 17")
+
+          if 'jvmTarget = "17"' not in s:
+              print("WARNING: Check Kotlin JVM target setting.")
+          else:
+              print("Kotlin JVM target is already 17.")
+          PY
+
+      - name: Build PAXLOAD Debug APK
         run: gradle --no-daemon -p PAXLOAD_Source_Project assembleDebug
 
-      - name: Upload APK
+      - name: Upload PAXLOAD APK
         uses: actions/upload-artifact@v4
         with:
           name: PAXLOAD-debug-apk
           path: PAXLOAD_Source_Project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
